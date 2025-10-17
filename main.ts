@@ -1,15 +1,25 @@
-import express, { Application, Request, Response } from 'express';
-import session from 'express-session';
-import path from 'path';
-const __dirname = path.dirname('.'); // get the name of the directory
+/*
+ Copyright 2025 IBM Corp.
+ Licensed under the Apache License, Version 2.0 (the "License");
+ you may not use this file except in compliance with the License.
+ You may obtain a copy of the License at
+ http://www.apache.org/licenses/LICENSE-2.0
+ Unless required by applicable law or agreed to in writing, software
+ distributed under the License is distributed on an "AS IS" BASIS,
+ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ See the License for the specific language governing permissions and
+ limitations under the License.
+*/
+//***********************************************************//
+// Loan Risk - AI Agent
+// LangGraph - single AI agent with LLM and tools
+// Author: Anuj Jain (jainanuj@us.ibm.com)
+//***********************************************************//
 
-// Extend express-session types to include 'user'
-declare module 'express-session' {
-  interface SessionData {
-    questions?: any[]; 
-    answers?: any[];
-  }
-}
+import express, { Application, Request, Response } from 'express';
+import path from 'path';
+import fs from 'fs';
+const __dirname = path.dirname('.'); // get the name of the directory
 
 import { AIMessage, BaseMessage, HumanMessage } from "@langchain/core/messages";
 import { tool } from "@langchain/core/tools";
@@ -20,10 +30,115 @@ import { ToolNode } from "@langchain/langgraph/prebuilt";
 
 import { ChatWatsonx } from "@langchain/community/chat_models/ibm";
 
-import { fetchTodos } from "./api.js"
-import { setEnvironment } from "./env.js"
 
-setEnvironment();
+/////////////////////////////////
+
+//Pre configured required environment variables
+process.env.APPLICATION_NAME="LoanRisk-AIAgent";
+process.env.WATSONX_AI_AUTH_TYPE="iam"
+process.env.IBM_IAM_TOKEN_ENDPOINT="https://iam.cloud.ibm.com/identity/token"
+
+//Set these REQUIRED environment variables as part of the deployment
+
+//REQUIRED environment variables
+//process.env.APPLICATION_PORT="8080"; //default is 8080. If using Docker, it must be same in Dockerfile.
+
+//REQUIRED environment variables when using IBM Cloud watsonx.ai platform LLMs
+//process.env.WATSONX_AI_APIKEY="xxxxxxxxxxx"
+//process.env.WATSONX_SERVICE_URL="https://us-south.ml.cloud.ibm.com" //default is us-south region
+//process.env.WATSONX_PROJECT_ID="xxx-xxx-xxx-xxx-xxx"
+
+//Optional - For using RAG LLM set rag llm watsonx environment variables to set in deployment
+//process.env.ENABLE_RAG_LLM = "true" //default is false. true requires WATSONX_RISK_RAG_LLM_ENDPOINT; 
+//process.env.WATSONX_RISK_RAG_LLM_ENDPOINT="https://private.us-south.ml.cloud.ibm.com/ml/v4/deployments/xxx-xxx-xxx-xxx-xxx/ai_service?version=2021-05-01";
+
+//Optional - For using watsonx Assistant. Creates a /wx.html webpage with the chat widget
+//process.env.ENABLE_WXASST="true" //default is false. true requires the other WXASST_ variables. These are available in the Embed script of the watsonx assistant
+//process.env.WXASST_INTEGRATION_ID="xxx-xxx-xxx-xx-xx"
+//process.env.WXASST_REGION="xx-xxx" 
+//process.env.WXASST_SERVICE_INSTANCE_ID="xxx-xxxx-xxx-xx-x"
+
+//environment variables set by functions in the code
+//process.env.IBM_IAM_TOKEN="to be set by function"
+//process.env.IBM_IAM_TOKEN_EXPIRATION="to be set by function"
+
+//Validate the environment variables. Set defaults when not provided.
+if (process.env.WATSONX_AI_APIKEY) {
+  console.log("Setting process.env.WATSONX_AI_APIKEY from envars:", process.env.WATSONX_AI_APIKEY);
+} else {
+  console.error("WATSONX_AI_APIKEY envar is not set.");
+}
+
+if (process.env.WATSONX_PROJECT_ID) {
+  console.log("Setting process.env.WATSONX_PROJECT_ID from envars:", process.env.WATSONX_PROJECT_ID);
+} else {
+  console.error("WATSONX_PROJECT_ID envar is not set.");
+}
+
+if (process.env.APPLICATION_PORT) {
+  console.log("Setting process.env.APPLICATION_PORT from envars:", process.env.APPLICATION_PORT);
+} else {
+  process.env.APPLICATION_PORT="8080";
+  console.log("Using default process.env.APPLICATION_PORT:", process.env.APPLICATION_PORT);
+}
+
+if (process.env.WATSONX_SERVICE_URL) {
+  console.log("Setting process.env.WATSONX_SERVICE_URL from envars:", process.env.WATSONX_SERVICE_URL);
+} else {
+  process.env.WATSONX_SERVICE_URL="https://us-south.ml.cloud.ibm.com";
+  console.log("Using default process.env.WATSONX_SERVICE_URL:", process.env.WATSONX_SERVICE_URL);
+}
+
+if (process.env.ENABLE_RAG_LLM) {
+  console.log("Using process.env.ENABLE_RAG_LLM from envars:", process.env.ENABLE_RAG_LLM);
+  if (process.env.ENABLE_RAG_LLM.toLowerCase()==='true') {
+    //console.log("Setting process.env.ENABLE_RAG_LLM from envars:", process.env.ENABLE_RAG_LLM);
+    console.log("Requires WATSONX_RISK_RAG_LLM_ENDPOINT from envars. Uses bearer token using WATSONX_AI_APIKEY from envars.");
+    if (process.env.WATSONX_RISK_RAG_LLM_ENDPOINT) {
+      console.log("Setting process.env.WATSONX_RISK_RAG_LLM_ENDPOINT from envars:", process.env.WATSONX_RISK_RAG_LLM_ENDPOINT);
+    } else {
+      console.error("WATSONX_RISK_RAG_LLM_ENDPOINT envar is not set.");
+    }
+  }
+} else {
+  process.env.ENABLE_RAG_LLM="false";
+  console.log("Using default process.env.ENABLE_RAG_LLM:", process.env.ENABLE_RAG_LLM);
+}
+
+if (process.env.ENABLE_WXASST) {
+  if (process.env.ENABLE_WXASST.toLowerCase()==='true') {
+    console.log("Setting up watsonx Assistant widget for page /wx.html. Envar ENABLE_WXASST:", process.env.ENABLE_WXASST);
+    if (process.env.WXASST_INTEGRATION_ID && process.env.WXASST_REGION && process.env.WXASST_SERVICE_INSTANCE_ID) {
+      fs.readFile('public/wx-template.html', 'utf8', function (err,data) {
+        if (err) {
+          return console.log(err);
+        }
+        var result1 = data.replace('[[[WXASST_INTEGRATION_ID]]]', process.env.WXASST_INTEGRATION_ID );
+        var result2 = result1.replace('[[[WXASST_REGION]]]', process.env.WXASST_REGION );
+        var result3 = result2.replace('[[[WXASST_SERVICE_INSTANCE_ID]]]', process.env.WXASST_SERVICE_INSTANCE_ID );
+
+        fs.writeFile('public/wx.html', result3, 'utf8', function (err) {
+          if (err) return console.log(err);
+        });
+      });
+      fs.readFile('public/wx-template2.html', 'utf8', function (err,data) {
+        if (err) {
+          return console.log(err);
+        }
+        var result1 = data.replace('[[[WXASST_INTEGRATION_ID]]]', process.env.WXASST_INTEGRATION_ID );
+        var result2 = result1.replace('[[[WXASST_REGION]]]', process.env.WXASST_REGION );
+        var result3 = result2.replace('[[[WXASST_SERVICE_INSTANCE_ID]]]', process.env.WXASST_SERVICE_INSTANCE_ID );
+
+        fs.writeFile('public/wx-detailed.html', result3, 'utf8', function (err) {
+          if (err) return console.log(err);
+        });
+      });
+    } else {
+      console.log("Unable to set up watsonx Assistant widget. Missing one or more envars from WXASST_INTEGRATION_ID, WXASST_REGION, WXASST_SERVICE_INSTANCE_ID,");
+    }
+  }
+}
+
 
 const agentic_instructions = {
   credit_score_tool:'Get the credit score for the customer using the customer id. Customer\'s name can be used instead of customer\'s id. If the credit score is already known do not retrieve again.', 
@@ -51,18 +166,6 @@ const agentic_instructions = {
 /////////////////////////////////
 
 const webapp: Application = express();
-webapp.use(
-  session({
-    secret: 'your_secret_key', // Replace with a strong, random secret
-    resave: false, // Don't save session if unmodified
-    saveUninitialized: false, // Don't create session until something is stored
-    cookie: {
-      maxAge: 1000 * 60 * 60 * 24, // 1 day
-      secure: process.env.NODE_ENV === 'production', // Use secure cookies in production
-      httpOnly: true, // Prevent client-side JavaScript from accessing the cookie
-    },
-  })
-);
 
 // Serve static files from the 'public' directory
 webapp.use(express.static(path.join(__dirname, 'public')));
@@ -83,9 +186,8 @@ webapp.get('/', async (req: Request, res: Response) => {
 //Define a route for the ai agent application graph processing
 webapp.post('/callagent', async (req: Request, res: Response) => {
 
-  req.session.questions = req.session.questions || [];
-  req.session.answers = req.session.answers || [];
-  console.log('Received request on callagent endpoint.', req.body);
+  console.log('Received request on callagent endpoint.');
+  //console.log(req.body);
   const input_post_body=req.body;
   //app.use(express.json()) is set in the code and so by default parse all input as JSON
   //changes all input to json already
@@ -104,12 +206,6 @@ webapp.post('/callagent', async (req: Request, res: Response) => {
   console.log("Input query for agent: ", query);
 
   const query_response = await runAppWithQuery(query);
-
-  req.session.questions.push(req.body);
-  req.session.answers.push(query_response);
-  console.log("=============USER",req.session);
-
-
   res.send(query_response);
 
 
@@ -197,19 +293,33 @@ const get_ibm_iam_token = async () => {
     access_token=process.env.IBM_IAM_TOKEN;
   }
 
+
+
   return access_token;
 
 };
 
-const setupTools = async () => {
 
-  const todos = await fetchTodos()
+const setupTools = async () => {
 
     function getRndInteger(min, max) {
         return Math.floor(Math.random() * (max - min + 1) ) + min;
     }
 
-    const getCreditScore = tool( async ({ customer_id } ) => {
+    // Customer information
+    // customer_id : "loren@ibm.com" || "loren" || "1111" 
+    // credit_score = 455;
+    // account_status = 'good-standing' ;
+
+    // customer_id : "matt@ibm.com" || "matt" || "2222"
+    // credit_score = 685;
+    // account_status = 'closed';
+
+    // customer_id : "hilda@ibm.com" || "hilda" || "3333"
+    // credit_score = 825;
+    // account_status = 'delinquent';
+
+    const getCreditScore = tool(({ customer_id } ) => {
             var credit_score = 0;
 	    customer_id=customer_id.toLowerCase();
             if (customer_id === "loren@ibm.com" || customer_id === "loren" || customer_id ==="1111" ) {
@@ -221,8 +331,7 @@ const setupTools = async () => {
             } else {
                     credit_score = getRndInteger(300, 850);
             }
-            let todos = await fetchTodos();
-            return todos[60].id //credit_score; // 555;
+            return credit_score; // 555;
         }, {
             name: 'get_credit_score',
             description: agentic_instructions.credit_score_tool,
@@ -252,7 +361,7 @@ const setupTools = async () => {
             description: agentic_instructions.account_status_tool,
             schema: z.object({
                //customer_id: z.string().optional().describe("Customer's id"),
-               customer_id: z.string().describe(" "),
+               customer_id: z.string().describe("Customer's id"),
             })
     })
 
@@ -407,6 +516,7 @@ const setupTools = async () => {
 
 const setupModelWithTools = async (tools: Array<any>) => {
 
+
     if ( agentic_instructions.model == 'watsonx-ChatWatsonx' ) {
     //props for meta-llama/llama-3-2-90b-vision-instruct or other models
     console.log('Using watsonx-ChatWatsonx');
@@ -434,9 +544,15 @@ const setupModelWithTools = async (tools: Array<any>) => {
         
         return modelWithTools;
     }; // end if watsonx-ChatWatsonx',
+  
+    //return modelWithTools; //returned in the block.
+
 };
 
+///
+
 const setupApp = async (tools: Array<any>, modelWithTools) => {
+
 
     const toolNodeForGraph = new ToolNode(tools)
     
@@ -450,11 +566,13 @@ const setupApp = async (tools: Array<any>, modelWithTools) => {
     return END;
     }
 
+
     const callModel = async (state) => {
         const { messages } = state;
         const response = await modelWithTools.invoke(messages);
         return { messages: response };
     }
+
 
     const workflow = new StateGraph(MessagesAnnotation)
     .addNode("agent", callModel)
@@ -466,6 +584,7 @@ const setupApp = async (tools: Array<any>, modelWithTools) => {
     const app = workflow.compile()
 
     return app;
+
 
 };
 

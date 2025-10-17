@@ -256,13 +256,3 @@ body {
 #menu li a {
     color: black;
 }
-
-.agent-div {
-    border: 1px solid #ccc;
-    background-color: #ccffff;
-}
-
-.user-div {
-    border: 1px solid #ccc;
-    background-color: #ffffcc;
-}
