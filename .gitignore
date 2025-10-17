@@ -1,0 +1,39 @@
+# amplify
+node_modules
+.amplify
+amplify_outputs*
+amplifyconfiguration*
+/Pipfile.lock
+/Pipfile
+/.idea
+*__pycache__*
+#start.sh
+app.log
+.npm
+.env
+.DS_Store
+Library/*
+.bash_history
+/requirements.txt
+
+/backend/backend-app*
+venv/
+
+# ignore requirements.txt
+requirements.txt
+/app-backend.log
+/backend/quiz/sample_quiz/
+*.log
+/backend/logs
+/.vscode/
+/aws_keys.sh
+/commands.sh
+logs/backend-app.log.*
+/backend/locales
+/frontend/build/
+
+# Local development SSL certificates
+localhost.pem
+localhost-key.pem
+/backend/locales
+/frontend/build/
